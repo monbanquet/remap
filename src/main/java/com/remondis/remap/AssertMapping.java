@@ -15,6 +15,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -78,7 +79,7 @@ public class AssertMapping<S, D> {
    */
   public <RS> ReassignAssertBuilder<S, D, RS> expectReassign(TypedSelector<RS, S> sourceSelector) {
     denyNull("sourceSelector", sourceSelector);
-    TypedPropertyDescriptor<RS> typedSourceProperty = getTypedPropertyFromFieldSelector(ASSIGN,
+    TypedPropertyDescriptor<RS> typedSourceProperty = getTypedPropertyFromFieldSelector(Target.SOURCE, ASSIGN,
         getMapping().getSource(), sourceSelector);
     ReassignAssertBuilder<S, D, RS> reassignBuilder = new ReassignAssertBuilder<S, D, RS>(typedSourceProperty,
         getMapping().getDestination(), this);
@@ -99,12 +100,28 @@ public class AssertMapping<S, D> {
     denyNull("sourceSelector", sourceSelector);
     denyNull("destinationSelector", destinationSelector);
 
-    TypedPropertyDescriptor<RS> sourceProperty = getTypedPropertyFromFieldSelector(TRANSFORM, getMapping().getSource(),
-        sourceSelector);
-    TypedPropertyDescriptor<RD> destProperty = getTypedPropertyFromFieldSelector(TRANSFORM,
+    TypedPropertyDescriptor<RS> sourceProperty = getTypedPropertyFromFieldSelector(Target.SOURCE, TRANSFORM,
+        getMapping().getSource(), sourceSelector);
+    TypedPropertyDescriptor<RD> destProperty = getTypedPropertyFromFieldSelector(Target.DESTINATION, TRANSFORM,
         getMapping().getDestination(), destinationSelector);
 
     ReplaceAssertBuilder<S, D, RD, RS> builder = new ReplaceAssertBuilder<>(sourceProperty, destProperty, this);
+    return builder;
+  }
+
+  /**
+   * Specifies an assertion for a set operation.
+   *
+   * @param destinationSelector
+   *        The destination field selector.
+   * @return Returns a {@link ReplaceAssertBuilder} for further configuration.
+   */
+  public <RD> SetAssertBuilder<S, D, RD> expectSet(TypedSelector<RD, D> destinationSelector) {
+    denyNull("destinationSelector", destinationSelector);
+
+    TypedPropertyDescriptor<RD> destProperty = getTypedPropertyFromFieldSelector(Target.DESTINATION, TRANSFORM,
+        getMapping().getDestination(), destinationSelector);
+    SetAssertBuilder<S, D, RD> builder = new SetAssertBuilder<>(destProperty, this);
     return builder;
   }
 
@@ -121,10 +138,10 @@ public class AssertMapping<S, D> {
       TypedSelector<Collection<RS>, S> sourceSelector, TypedSelector<Collection<RD>, D> destinationSelector) {
     denyNull("sourceSelector", sourceSelector);
     denyNull("destinationSelector", destinationSelector);
-    TypedPropertyDescriptor<Collection<RS>> sourceProperty = getTypedPropertyFromFieldSelector(ReplaceBuilder.TRANSFORM,
-        getMapping().getSource(), sourceSelector);
-    TypedPropertyDescriptor<Collection<RD>> destProperty = getTypedPropertyFromFieldSelector(ReplaceBuilder.TRANSFORM,
-        getMapping().getDestination(), destinationSelector);
+    TypedPropertyDescriptor<Collection<RS>> sourceProperty = getTypedPropertyFromFieldSelector(Target.SOURCE,
+        ReplaceBuilder.TRANSFORM, getMapping().getSource(), sourceSelector);
+    TypedPropertyDescriptor<Collection<RD>> destProperty = getTypedPropertyFromFieldSelector(Target.DESTINATION,
+        ReplaceBuilder.TRANSFORM, getMapping().getDestination(), destinationSelector);
 
     ReplaceCollectionAssertBuilder<S, D, RD, RS> builder = new ReplaceCollectionAssertBuilder<>(sourceProperty,
         destProperty, this);
@@ -148,8 +165,8 @@ public class AssertMapping<S, D> {
   public AssertMapping<S, D> expectOmitInSource(FieldSelector<S> sourceSelector) {
     denyNull("sourceSelector", sourceSelector);
     // Omit in destination
-    PropertyDescriptor propertyDescriptor = getPropertyFromFieldSelector(OMIT_FIELD_SOURCE, getMapping().getSource(),
-        sourceSelector);
+    PropertyDescriptor propertyDescriptor = getPropertyFromFieldSelector(Target.SOURCE, OMIT_FIELD_SOURCE,
+        getMapping().getSource(), sourceSelector);
     OmitTransformation omitSource = omitSource(getMapping(), propertyDescriptor);
     _add(omitSource);
     return this;
@@ -164,8 +181,8 @@ public class AssertMapping<S, D> {
    */
   public AssertMapping<S, D> expectOmitInDestination(FieldSelector<D> destinationSelector) {
     denyNull("destinationSelector", destinationSelector);
-    PropertyDescriptor propertyDescriptor = getPropertyFromFieldSelector(OMIT_FIELD_DEST, getMapping().getDestination(),
-        destinationSelector);
+    PropertyDescriptor propertyDescriptor = getPropertyFromFieldSelector(Target.DESTINATION, OMIT_FIELD_DEST,
+        getMapping().getDestination(), destinationSelector);
     OmitTransformation omitDestination = omitDestination(getMapping(), propertyDescriptor);
     _add(omitDestination);
     return this;
@@ -186,12 +203,7 @@ public class AssertMapping<S, D> {
   }
 
   /**
-   * This method checks the replace functions. The following scenarios are checked:
-   * <ol>
-   * <li>The functions do not throw an exception when invoked using sample values
-   * <li>
-   * <li>The function is null-safe if null strategy is not skip-when-null</li>
-   * </ol>
+   * This method checks the replace functions is null-safe if null strategy is not skip-when-null.
    */
   @SuppressWarnings("rawtypes")
   private void checkReplaceFunctions() {
@@ -205,17 +217,29 @@ public class AssertMapping<S, D> {
           return (SkipWhenNullTransformation) t;
         })
         .forEach(r -> {
-          Transform<?, ?> transformation = r.getTransformation();
+          Function<?, ?> transformation = r.getTransformation();
           if (!r.isSkipWhenNull()) {
-            try {
-              transformation.transform(null);
-            } catch (NullPointerException t) {
-              throw new AssertionError(NOT_NULL_SAFE + r.toString(), t);
-            } catch (Throwable t) {
-              throw new AssertionError(UNEXPECTED_EXCEPTION + r.toString(), t);
-            }
+            assertionErrorIfNullCheckFails(r, transformation);
           }
         });
+  }
+
+  /**
+   * Throws an {@link AssertionError} if the specified {@link Function} is not null safe.
+   *
+   * @param r The {@link Transformation} that is validated.
+   * @param transformation The {@link Function} that is null checked.
+   * @throws AssertionError Thrown if the null check fails.
+   */
+  public static <S, D> void assertionErrorIfNullCheckFails(Transformation r, Function<S, D> transformation)
+      throws AssertionError {
+    try {
+      transformation.apply(null);
+    } catch (NullPointerException t) {
+      throw new AssertionError(NOT_NULL_SAFE + r.toString(), t);
+    } catch (Throwable t) {
+      throw new AssertionError(UNEXPECTED_EXCEPTION + r.toString(), t);
+    }
   }
 
   /**

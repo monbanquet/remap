@@ -5,6 +5,13 @@ import static com.remondis.remap.Mapping.getTypedPropertyFromFieldSelector;
 
 import java.beans.PropertyDescriptor;
 
+/**
+ * Builds a reassing operation.
+ *
+ * @param <S> The source type.
+ * @param <D> The destination type.
+ * @param <RS> The source field type.
+ */
 public class ReassignBuilder<S, D, RS> {
 
   static final String ASSIGN = "assign";
@@ -32,8 +39,8 @@ public class ReassignBuilder<S, D, RS> {
    */
   public Mapping<S, D> to(TypedSelector<RS, D> destinationSelector) {
     denyNull("destinationSelector", destinationSelector);
-    TypedPropertyDescriptor<RS> typedDestProperty = getTypedPropertyFromFieldSelector(ASSIGN, destination,
-        destinationSelector);
+    TypedPropertyDescriptor<RS> typedDestProperty = getTypedPropertyFromFieldSelector(Target.DESTINATION, ASSIGN,
+        destination, destinationSelector);
     PropertyDescriptor sourceProperty = typedSourceProperty.property;
     PropertyDescriptor destinationProperty = typedDestProperty.property;
     ReassignTransformation transformation = new ReassignTransformation(mapping, sourceProperty, destinationProperty);
